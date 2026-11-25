@@ -294,6 +294,10 @@ def build_mapping(rec: dict, ctx: dict) -> dict:
         "region_flag": f"--region={region}" if region else "",
         "zone_flag": f"--zone={zone}" if zone else "",
         "location_flag": f"--location={location}" if location else "",
+        # Gcloud mới đòi scope rõ ràng khi describe ("Underspecified resource"):
+        # regional → --region, zonal → --zone, còn lại → --global
+        "scope_flag": (f"--region={region}" if region
+                       else f"--zone={zone}" if zone else "--global"),
     }
 
 
@@ -322,7 +326,7 @@ SERVICES = [
     dict(key="cloud_armor", file="04_cloud_armor.json", service="Cloud Armor",
          api="compute.googleapis.com",
          groups=[dict(name="security_policies", list="compute security-policies list",
-                      describe="compute security-policies describe {name} {region_flag}",
+                      describe="compute security-policies describe {name} {scope_flag}",
                       region_from="region")]),
     dict(key="certificate_manager", file="05_certificate_manager.json",
          service="Cloud Certificate Manager", api="certificatemanager.googleapis.com",
@@ -334,34 +338,35 @@ SERVICES = [
          api="compute.googleapis.com",
          groups=[
              dict(name="addresses", list="compute addresses list",
-                  describe="compute addresses describe {name} {region_flag}",
+                  describe="compute addresses describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="forwarding_rules", list="compute forwarding-rules list",
-                  describe="compute forwarding-rules describe {name} {region_flag}",
+                  describe="compute forwarding-rules describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="target_http_proxies", list="compute target-http-proxies list",
-                  describe="compute target-http-proxies describe {name} {region_flag}",
+                  describe="compute target-http-proxies describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="target_https_proxies", list="compute target-https-proxies list",
-                  describe="compute target-https-proxies describe {name} {region_flag}",
+                  describe="compute target-https-proxies describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="target_tcp_proxies", list="compute target-tcp-proxies list",
-                  describe="compute target-tcp-proxies describe {name} {region_flag}",
+                  describe="compute target-tcp-proxies describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="target_ssl_proxies", list="compute target-ssl-proxies list",
+                  # target-ssl-proxies KHÔNG có --global → giữ region_flag (rỗng = global)
                   describe="compute target-ssl-proxies describe {name} {region_flag}",
                   region_from="region"),
              dict(name="url_maps", list="compute url-maps list",
-                  describe="compute url-maps describe {name} {region_flag}",
+                  describe="compute url-maps describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="backend_services", list="compute backend-services list",
-                  describe="compute backend-services describe {name} {region_flag}",
+                  describe="compute backend-services describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="health_checks", list="compute health-checks list",
-                  describe="compute health-checks describe {name} {region_flag}",
+                  describe="compute health-checks describe {name} {scope_flag}",
                   region_from="region"),
              dict(name="negs", list="compute network-endpoint-groups list",
-                  describe="compute network-endpoint-groups describe {name} {region_flag} {zone_flag}",
+                  describe="compute network-endpoint-groups describe {name} {scope_flag}",
                   region_from="region_or_zone"),
          ]),
     dict(key="cloud_run", file="07_cloud_run.json", service="Cloud Run",
@@ -486,8 +491,16 @@ def describe_one(group: dict, rec: dict, ctx: dict, project: str, errors: list):
         return None
     if isinstance(data, dict):
         return data
+    # Một số lệnh/version gcloud trả về mảng cho describe → nhận mảng 1 phần tử
+    if isinstance(data, list) and data and all(isinstance(d, dict) for d in data):
+        if len(data) == 1:
+            return data[0]
+        append_error(errors, "describe", group["name"], name, " ".join(cmd),
+                     f"describe trả về mảng {len(data)} phần tử (mong đợi 1 object) "
+                     f"— cmd: {' '.join(cmd)}")
+        return None
     append_error(errors, "describe", group["name"], name, " ".join(cmd),
-                 f"JSON không hợp lệ: {str(data)[:100]}")
+                 f"JSON không hợp lệ — cmd: {' '.join(cmd)} | {str(data)[:150]}")
     return None
 
 
@@ -646,8 +659,9 @@ def main() -> int:
         print(f"  {svc['file']}: {out['count']} resource{note}{err_note}")
         if out["errors"]:
             e0 = out["errors"][0]
-            print(f"      ↳ lỗi đầu tiên [{e0['stage']}] {e0['group']}/"
-                  f"{e0['resource']}: {e0['error'][:200]}")
+            print(f"      ↳ [{e0['stage']}] {e0['group']}/{e0['resource']}: "
+                  f"{e0['error'][:200]}")
+            print(f"         cmd: {e0['cmd'][:140]}")
         total_res += out["count"]
         total_all += out["count_all"]
         total_errors += len(out["errors"])
