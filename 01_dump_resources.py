@@ -17,6 +17,9 @@ Service + file output (thứ tự theo yêu cầu):
   09_vm.json                   VM (Compute Engine)
   10_spanner.json              Cloud Spanner
   11_redis.json                Memorystore (Redis)
+  12_dedicated_interconnect.json  Dedicated Interconnect (connection + VLAN attachment)
+  13_ha_vpn.json               Cloud HA VPN (gateway, tunnel, external gateway)
+  14_cloud_router.json         Cloud Router
 
 Sử dụng:
   ./01_dump_resources.py --project <PROJECT_ID>
@@ -391,6 +394,37 @@ SERVICES = [
          groups=[dict(name="instances", list="redis instances list --region={region}",
                       describe="redis instances describe {name} --region={region}",
                       per_region=True, region_from="region")]),
+    dict(key="dedicated_interconnect", file="12_dedicated_interconnect.json",
+         service="Dedicated Interconnect", api="interconnect.googleapis.com",
+         groups=[
+             # Physical circuit → không lọc theo region (vị trí co-lo không phải Tokyo/Osaka)
+             dict(name="connections", list="compute interconnects list",
+                  describe="compute interconnects describe {name}",
+                  region_from=None),
+             dict(name="attachments", list="compute interconnects attachments list",
+                  describe="compute interconnects attachments describe {name} {region_flag}",
+                  region_from=None),
+         ]),
+    dict(key="ha_vpn", file="13_ha_vpn.json", service="Cloud HA VPN",
+         api="compute.googleapis.com",
+         groups=[
+             dict(name="vpn_gateways", list="compute vpn-gateways list",
+                  describe="compute vpn-gateways describe {name} --region={region}",
+                  region_from="region"),
+             dict(name="vpn_tunnels", list="compute vpn-tunnels list",
+                  describe="compute vpn-tunnels describe {name} --region={region}",
+                  region_from="region"),
+             # External gateway (phía on-prem) là global → luôn giữ
+             dict(name="external_vpn_gateways",
+                  list="compute external-vpn-gateways list",
+                  describe="compute external-vpn-gateways describe {name}",
+                  region_from=None),
+         ]),
+    dict(key="cloud_router", file="14_cloud_router.json", service="Cloud Router",
+         api="compute.googleapis.com",
+         groups=[dict(name="routers", list="compute routers list",
+                      describe="compute routers describe {name} --region={region}",
+                      region_from="region")]),
 ]
 
 
@@ -610,6 +644,10 @@ def main() -> int:
             f" (trước lọc region: {out['count_all']})"
         err_note = f" · ⚠ {len(out['errors'])} lỗi" if out["errors"] else ""
         print(f"  {svc['file']}: {out['count']} resource{note}{err_note}")
+        if out["errors"]:
+            e0 = out["errors"][0]
+            print(f"      ↳ lỗi đầu tiên [{e0['stage']}] {e0['group']}/"
+                  f"{e0['resource']}: {e0['error'][:200]}")
         total_res += out["count"]
         total_all += out["count_all"]
         total_errors += len(out["errors"])
